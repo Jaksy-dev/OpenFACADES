@@ -1,6 +1,15 @@
 import os
 from pathlib import Path
 import argparse
+from functools import partial
+from concurrent.futures import ThreadPoolExecutor
+
+# zensvi's Mapillary downloader uses ThreadPoolExecutor() with the default
+# min(32, cpu_count + 4) workers. Downloads are latency-bound (~1s per uncached
+# image), so allow more concurrent requests. Override with MLY_WORKERS.
+MLY_WORKERS = int(os.environ.get("MLY_WORKERS", 32))
+import zensvi.download.mly as _zensvi_mly
+_zensvi_mly.ThreadPoolExecutor = partial(ThreadPoolExecutor, max_workers=MLY_WORKERS)
 
 def parse_bbox(bbox_str: str) -> list[float]:
     trimmed = bbox_str.strip().strip("[]")
@@ -127,6 +136,22 @@ def download_selected_images(output_path, path_pid, mly_api_key):
     from zensvi.download import MLYDownloader
 
     print("=== Downloading Selected Panoramic Images ===")
+    import pandas as pd
+
+    # zensvi reuses <output_path>/pids_urls.csv if present and downloads every
+    # URL in it, not just the selected ones. Trim it to the current selection.
+    cached_urls = os.path.join(output_path, "pids_urls.csv")
+    if os.path.exists(cached_urls):
+        selected = set(pd.read_csv(path_pid)["id"].dropna().astype("int64"))
+        urls = pd.read_csv(cached_urls)
+        keep = urls[urls["id"].isin(selected) & urls["url"].notna()]
+        if len(keep) < len(urls):
+            print(f"Trimming cached URL list to selection: {len(urls)} -> {len(keep)}")
+            if keep["id"].nunique() < len(selected):
+                os.remove(cached_urls)  # incomplete for this selection; refetch
+            else:
+                keep.to_csv(cached_urls, index=False)
+
     mly_downloader = MLYDownloader(mly_api_key)
     mly_downloader.download_svi(
         output_path,
@@ -218,7 +243,10 @@ def main():
     bbox = args.bbox
     mly_api_key = args.api_key
     
-    output_path = os.path.join(os.getcwd(), "output")
+    # One output folder per bbox so cached files from other areas aren't reused.
+    bbox_tag = "_".join(f"{v:g}" for v in bbox)
+    output_path = os.path.join(os.getcwd(), "output", f"bbox_{bbox_tag}")
+    print(f"Output folder: {output_path}")
     output_data_path = os.path.join(output_path, '01_data')
     output_img_path = os.path.join(output_path, '02_img')
     os.makedirs(output_path, exist_ok=True)

@@ -6,7 +6,6 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 import json
-from decord import VideoReader, cpu
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModel, AutoTokenizer

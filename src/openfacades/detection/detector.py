@@ -30,7 +30,8 @@ class GroundingDinoDetector:
         config_path: str = "config/GroundingDINO_SwinT_OGC.py",
         weights_url: str = "https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth",
         weights_dir: str = "weights",
-        weights_file: str = "groundingdino_swint_ogc.pth"
+        weights_file: str = "groundingdino_swint_ogc.pth",
+        device: str = None
     ):
         """
         Initialize the detector, ensuring weights are downloaded
@@ -47,6 +48,10 @@ class GroundingDinoDetector:
         self.weights_dir = os.path.join(self.current_dir, weights_dir)
         self.weights_file = os.path.join(self.weights_dir, weights_file)
         self.weights_url = weights_url
+        if device is None:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
 
         # Ensure weights are downloaded
         self._download_weights()
@@ -54,7 +59,8 @@ class GroundingDinoDetector:
         # Load the model
         self.model = load_model(
             self.config_path,
-            self.weights_file
+            self.weights_file,
+            device=self.device
         )
 
     def _download_weights(self):
@@ -234,7 +240,8 @@ class GroundingDinoDetector:
                         image=gdi_image,
                         caption=text_prompt,
                         box_threshold=box_threshold,
-                        text_threshold=text_threshold
+                        text_threshold=text_threshold,
+                        device=self.device
                     )
                 except Exception as e:
                     print(f"Error processing image {img_path} and building id {building_id}: {e}")

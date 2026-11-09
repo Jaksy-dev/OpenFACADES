@@ -10,25 +10,30 @@ import time
 
 
 class InternVLProcessor:
-    def __init__(self, model):
+    def __init__(self, model, device=None):
+        # torch.cuda also covers AMD GPUs on ROCm builds of PyTorch.
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        self.dtype = torch.bfloat16 if device != "cpu" else torch.float32
         self.model = AutoModel.from_pretrained(
-            model, 
-            torch_dtype=torch.bfloat16, 
-            low_cpu_mem_usage=True, 
-            use_flash_attn=True, 
+            model,
+            torch_dtype=self.dtype,
+            low_cpu_mem_usage=True,
+            use_flash_attn=False,  # flash-attn is NVIDIA-only; not needed
             trust_remote_code=True,
-            device_map='auto'
-        ).eval().cuda()
+        ).eval().to(device)
         self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True, use_fast=False)
 
-    def process_image(self, image_path, question):
+    def process_image(self, image_path, question, generation_config=None):
         pixel_values = load_image(image_path, max_num=12)
         if pixel_values is None:
             print(f"Skipping {image_path}, image could not be loaded.")
             return None
 
-        pixel_values = pixel_values.to(torch.bfloat16).cuda()
-        generation_config = {"max_new_tokens": 1024, "do_sample": False}
+        pixel_values = pixel_values.to(self.dtype).to(self.device)
+        if generation_config is None:
+            generation_config = {"max_new_tokens": 1024, "do_sample": False}
         response, _ = self.model.chat(
             self.tokenizer, 
             pixel_values, 
@@ -81,7 +86,7 @@ class InternVLProcessor:
         else:
             raise ValueError("Invalid input. Provide a csv_input, single_image, or single_directory.")
 
-def building_vlm(model, question, single_image=None, single_directory=None, output_directory=None, csv_input=None, image_directory=None):
+def building_vlm(model, question, single_image=None, single_directory=None, output_directory=None, csv_input=None, image_directory=None, device=None):
     """
     Process images using the given model and question.
 
@@ -93,7 +98,7 @@ def building_vlm(model, question, single_image=None, single_directory=None, outp
     :param output_directory: Directory to save JSON output if processing multiple images.
     :param image_directory: (Required if csv_input is provided) Directory where images are stored.
     """
-    processor = InternVLProcessor(model)
+    processor = InternVLProcessor(model, device=device)
     processor.question_answering(
         question, 
         single_image=single_image, 

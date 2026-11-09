@@ -3,3 +3,11 @@ InternVL/
 data/
 .DS_Store
 .env.local
+
+# local artifacts
+__pycache__/
+*.egg-info/
+cache/
+output/
+src/openfacades/detection/weights/
+*.pt
