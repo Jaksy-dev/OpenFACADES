@@ -19,6 +19,36 @@ def parse_bbox(bbox_str: str) -> list[float]:
         raise ValueError("bbox must have exactly 4 values.")
     return [float(x) for x in parts]
 
+def extract_bbox_from_planet(planet_path, bbox, output_path):
+    """
+    Cut the bbox out of a large .osm.pbf (e.g. the full planet) with osmium and
+    write it as OSM XML for osmnx. Cached: skipped if the extract already exists.
+    The 'smart' strategy keeps buildings crossing the bbox edge complete.
+    """
+    import shutil
+    import subprocess
+
+    out_osm = os.path.join(output_path, "extract.osm")
+    if os.path.exists(out_osm):
+        print(f"OSM extract already exists, skipping: {out_osm}")
+        return out_osm
+    if not shutil.which("osmium"):
+        raise SystemExit("osmium (osmium-tool) is required for --osm_planet.")
+    if not os.path.exists(planet_path):
+        raise SystemExit(f"OSM planet file not found: {planet_path}")
+
+    print(f"=== Extracting bbox from {planet_path} (full-file scan, may take a while) ===")
+    tmp = out_osm + ".tmp"
+    subprocess.run(
+        ["osmium", "extract", "-b", ",".join(map(str, bbox)),
+         "--strategy", "smart", "-f", "osm", "-O", "-o", tmp, planet_path],
+        check=True,
+    )
+    os.replace(tmp, out_osm)  # only a complete extract counts as cached
+    print(f"Saved OSM extract to: {out_osm}")
+    return out_osm
+
+
 def download_and_merge_buildings(bbox, output_path, overwrite=False, osm_file=None):
     """
     Download OSM and Overture building footprints for the given bbox,
@@ -230,6 +260,9 @@ def main():
     parser.add_argument("--spacing", type=float, default=5.0,
                         help="Keep the best panorama every N metres (quality, then recency); 0 disables")
     parser.add_argument("--osm_file", help="Local .osm XML file for buildings instead of the Overpass API")
+    parser.add_argument("--osm_planet",
+                        help="Planet/region .osm.pbf to cut the bbox from with osmium "
+                             "(default: OSM_PLANET from .env); ignored if --osm_file is given")
     parser.add_argument("--source", choices=["mly", "gsv"], default="mly")
     parser.add_argument("--images", help="Local GSV panorama directory")
     parser.add_argument("--metadata", help="Local GSV metadata CSV")
@@ -260,8 +293,14 @@ def main():
     os.makedirs(output_data_path, exist_ok=True)
     os.makedirs(output_img_path, exist_ok=True)
 
+    # === 0) Cut the bbox out of a local planet/region extract (optional) ===
+    osm_file = args.osm_file
+    planet = args.osm_planet or os.environ.get("OSM_PLANET")
+    if not osm_file and planet:
+        osm_file = extract_bbox_from_planet(planet, bbox, output_data_path)
+
     # === 1) Download + Merge Building Footprints ===
-    download_and_merge_buildings(bbox, output_data_path, osm_file=args.osm_file)
+    download_and_merge_buildings(bbox, output_data_path, osm_file=osm_file)
 
     # === 2) Prepare MLY Metadata ===
     cleaned_csv = prepare_mly_metadata(bbox, output_data_path, mly_api_key, spacing_m=args.spacing)
