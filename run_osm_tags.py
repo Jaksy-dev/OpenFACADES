@@ -8,9 +8,10 @@ an .osc (OSM change) file with modified objects, then applies it with
 `osmium apply-changes`.
 
 Semantics (important):
-- CSV building_ids have no type prefix. The script looks each id up as an
-  OSM *way* first, then as a *relation* (multipolygon buildings), and
-  strips any w/n/r prefix if present.
+- CSV building_ids carry the OSM element type as prefix: 'w123' (way),
+  'r123' (relation), 'n123' (node, skipped: no footprint). Ids without a
+  prefix (older pipeline output) are looked up as a way first, then as a
+  relation. Non-OSM ids (Overture UUIDs) are skipped.
 - Only ADDS tags that are missing on the object. Existing tags are never
   modified or removed (checked against the actual OSM data).
 - A <modify> block carries the object's complete new state: all node refs
@@ -128,12 +129,22 @@ def first_value(row, cols):
 
 
 def norm_id(building_id):
-    """Normalize a building id: strip w/n/r or word prefixes, '.0' floats."""
-    bid = str(building_id).strip()
-    m = re.fullmatch(r"[a-zA-Z]*\s*(\d+)(?:\.0+)?", bid)
-    if m:
-        return m.group(1)
-    return None
+    """
+    Normalize a building id to 'w123' / 'r123' / 'n123', or a bare '123'
+    when the type is unknown (legacy data). Accepts n/w/r, node/way/relation
+    prefixes (optionally with '/'), and '.0' float suffixes. Returns None for
+    non-OSM ids such as Overture UUIDs.
+    """
+    bid = str(building_id).strip().lower()
+    m = re.fullmatch(r"(?:(node|way|relation|n|w|r)\s*[/_]?\s*)?(\d+)(?:\.0+)?", bid)
+    if not m:
+        return None
+    return (m.group(1)[0] if m.group(1) else "") + m.group(2)
+
+
+def split_id(key):
+    """'w123' -> ('w', '123'); '123' -> ('', '123')."""
+    return (key[0], key[1:]) if key[0].isalpha() else ("", key)
 
 
 def norm_levels(value):
@@ -317,9 +328,17 @@ def build_osc(ways, relations, tag_data, include_untagged):
             parts.append(f'      <tag k="{esc(k)}" v="{esc(v)}" />')
         parts.append(f'    </{obj_type}>')
 
-    for oid in sorted(tag_data, key=int):
-        new = tag_data[oid]
+    for key in sorted(tag_data, key=lambda k: (split_id(k)[0], int(split_id(k)[1]))):
+        new = tag_data[key]
+        prefix, oid = split_id(key)
+        if prefix == "n":
+            stats["skipped_node"] += 1  # node buildings have no footprint
+            continue
+        # typed ids only match their own element type; untyped (legacy) ids
+        # are tried as way first, then as relation
         for obj_type, store in (("way", ways), ("relation", relations)):
+            if prefix and prefix != obj_type[0]:
+                continue
             obj = store.get(oid)
             if obj is None:
                 continue
@@ -385,11 +404,13 @@ def main():
         if cstats[k]:
             print(f"  {k}: {cstats[k]}")
 
-    ways, relations = parse_extract(args.osm, tag_data.keys())
-    found = set(ways) | set(relations)
-    missing = set(tag_data) - found
-    print(f"ids found: {len(found)} ({len(ways)} as way, {len(relations)} as relation)"
-          f" / {len(tag_data)}")
+    ways, relations = parse_extract(args.osm, {split_id(k)[1] for k in tag_data})
+    found = {"w" + i for i in ways} | {"r" + i for i in relations}
+    missing = {k for k in tag_data
+               if k not in found and not (split_id(k)[0] == ""
+                                          and ("w" + k in found or "r" + k in found))}
+    print(f"ids found: {len(tag_data) - len(missing)} / {len(tag_data)}"
+          f" (in file: {len(ways)} ways, {len(relations)} relations with these numbers)")
     if missing:
         print(f"  not in OSM file: {len(missing)} ids, "
               f"e.g. {sorted(missing)[:10]}")

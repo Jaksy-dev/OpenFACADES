@@ -15,6 +15,19 @@ col_names = {
             'num_floors': 'building_floor'
         }
 
+def osm_typed_ids(gdf):
+    """
+    OSM ids with their element type as prefix: 'n123', 'w123', 'r123'.
+    Way and relation ids are separate number spaces, so the bare number is
+    ambiguous; Overture ids (UUIDs) are left without a prefix.
+    """
+    if "element" in gdf.columns:
+        prefix = gdf["element"].astype(str).str[0]
+    else:  # osmnx < 2.0 used 'element_type'
+        prefix = gdf["element_type"].astype(str).str[0]
+    return prefix + gdf["id"].astype(str)
+
+
 class BuildingDataDownloader:
     def __init__(self, source="osm", osm_file=None):
         """
@@ -49,7 +62,7 @@ class BuildingDataDownloader:
         # Keep only valid polygon geometries
         gdf = gdf[gdf.geometry.apply(lambda x: x.geom_type in ['Polygon', 'MultiPolygon'])]
         gdf.reset_index(drop=False, inplace=True)
-        gdf.rename(columns={"id": "osmid"}, inplace=True)
+        gdf["osmid"] = osm_typed_ids(gdf)
 
         # Select relevant columns
         selected_columns = ['osmid', 'building', 'start_date', 'building:levels', 'building:material', 'geometry']
@@ -78,7 +91,7 @@ class BuildingDataDownloader:
         # Keep only valid polygon geometries
         gdf = gdf[gdf.geometry.apply(lambda x: x.geom_type in ['Polygon', 'MultiPolygon'])]
         gdf.reset_index(drop=False, inplace=True)
-        gdf.rename(columns={"id": "osmid"}, inplace=True)
+        gdf["osmid"] = osm_typed_ids(gdf)
 
         # Select relevant columns
         selected_columns = ['osmid', 'building', 'start_date', 'building:levels', 'building:material', 'geometry']
