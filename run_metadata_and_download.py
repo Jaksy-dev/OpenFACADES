@@ -98,7 +98,8 @@ def download_selected_images(output_path, path_pid, mly_api_key):
 
 def main():
     bbox = [19.05085, 47.48667, 19.06508, 47.49492]
-    mly_api_key = "MLY|28359316630418089|d97008e9e9df81199d89f77536931500"
+    from openfacades.env import get_mly_api_key
+    mly_api_key = get_mly_api_key()
     output_path = os.path.join(os.getcwd(), "output")
     output_data_path = os.path.join(output_path, '01_data')
     output_img_path = os.path.join(output_path, '02_img')

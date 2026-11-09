@@ -19,7 +19,7 @@ def parse_bbox(bbox_str: str) -> list[float]:
         raise ValueError("bbox must have exactly 4 values.")
     return [float(x) for x in parts]
 
-def download_and_merge_buildings(bbox, output_path, overwrite=False):
+def download_and_merge_buildings(bbox, output_path, overwrite=False, osm_file=None):
     """
     Download OSM and Overture building footprints for the given bbox,
     harmonize them, and save as GeoJSON.
@@ -33,7 +33,7 @@ def download_and_merge_buildings(bbox, output_path, overwrite=False):
         return
     
     print("=== Downloading OSM Buildings ===")
-    downloader_osm = BuildingDataDownloader(source="osm")
+    downloader_osm = BuildingDataDownloader(source="osm", osm_file=osm_file)
     osm_data = downloader_osm.download_buildings(bbox)
 
     print("=== Downloading Overture Buildings ===")
@@ -52,13 +52,13 @@ def download_and_merge_buildings(bbox, output_path, overwrite=False):
     print(f"Saved harmonized footprints to: {out_geojson}")
 
 
-def prepare_mly_metadata(bbox, output_path, mly_api_key):
+def prepare_mly_metadata(bbox, output_path, mly_api_key, spacing_m=5.0):
     """
     Generate a bounding-box GeoJSON, then download Mapillary metadata
     (pano metadata only) into 'pids_urls.csv'.
     """
     from zensvi.download import MLYDownloader
-    from openfacades.streetview import bbox_to_geojson, process_metadata
+    from openfacades.streetview import bbox_to_geojson, process_metadata, thin_by_distance
 
     print("=== Preparing Bounding Box GeoJSON ===")
     bbox_gdf = bbox_to_geojson(bbox)
@@ -89,6 +89,9 @@ def prepare_mly_metadata(bbox, output_path, mly_api_key):
     cleaned_csv = os.path.join(output_path, "pids_urls_clean.csv")
     print(f"=== Cleaning MLY Metadata ===\nFrom: {raw_csv}\nTo:   {cleaned_csv}")
     process_metadata(raw_csv, cleaned_csv)
+
+    # Keep the best panorama (quality, then most recent) every spacing_m metres.
+    thin_by_distance(cleaned_csv, cleaned_csv, spacing_m=spacing_m)
 
     return cleaned_csv
 
@@ -223,7 +226,10 @@ def main():
         type=parse_bbox,
         help="Bounding box coordinates [left, bottom, right, top]"
     )
-    parser.add_argument("--api_key", type=str, help="Mapillary API key")
+    parser.add_argument("--api_key", type=str, help="Mapillary API key (default: MLY_API_KEY from .env)")
+    parser.add_argument("--spacing", type=float, default=5.0,
+                        help="Keep the best panorama every N metres (quality, then recency); 0 disables")
+    parser.add_argument("--osm_file", help="Local .osm XML file for buildings instead of the Overpass API")
     parser.add_argument("--source", choices=["mly", "gsv"], default="mly")
     parser.add_argument("--images", help="Local GSV panorama directory")
     parser.add_argument("--metadata", help="Local GSV metadata CSV")
@@ -237,11 +243,12 @@ def main():
         from run_local import run_local
         run_local(args.images, args.metadata, footprints=args.footprints)
         return
-    if not args.bbox or not args.api_key:
-        parser.error("Mapillary requires --bbox and --api_key.")
+    if not args.bbox:
+        parser.error("Mapillary requires --bbox.")
 
+    from openfacades.env import get_mly_api_key
     bbox = args.bbox
-    mly_api_key = args.api_key
+    mly_api_key = get_mly_api_key(args.api_key)
     
     # One output folder per bbox so cached files from other areas aren't reused.
     bbox_tag = "_".join(f"{v:g}" for v in bbox)
@@ -254,10 +261,10 @@ def main():
     os.makedirs(output_img_path, exist_ok=True)
 
     # === 1) Download + Merge Building Footprints ===
-    download_and_merge_buildings(bbox, output_data_path)
+    download_and_merge_buildings(bbox, output_data_path, osm_file=args.osm_file)
 
     # === 2) Prepare MLY Metadata ===
-    cleaned_csv = prepare_mly_metadata(bbox, output_data_path, mly_api_key)
+    cleaned_csv = prepare_mly_metadata(bbox, output_data_path, mly_api_key, spacing_m=args.spacing)
 
     # === 3) Compute + Filter AoV ===
     aov_csv_path, out_select = compute_and_filter_aov(cleaned_csv, output_data_path)

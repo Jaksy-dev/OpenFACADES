@@ -11,3 +11,4 @@ cache/
 output/
 src/openfacades/detection/weights/
 *.pt
+.env

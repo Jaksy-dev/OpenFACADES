@@ -25,7 +25,8 @@ def download_selected_images(output_path, path_pid, mly_api_key):
 def main():
     output_img_path = os.path.join(os.getcwd(), "output/02_img")
     out_select = os.path.join(os.getcwd(), "output/01_data/pids_urls_select.csv")
-    mly_api_key = "MLY|28359316630418089|d97008e9e9df81199d89f77536931500"
+    from openfacades.env import get_mly_api_key
+    mly_api_key = get_mly_api_key()
     
     print("=== Downloading Selected Panoramic Images ===")
     download_selected_images(output_img_path, out_select, mly_api_key)

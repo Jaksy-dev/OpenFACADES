@@ -47,7 +47,8 @@ def download_selected_images(output_path, path_pid, mly_api_key):
 def main():
     output_img_path = os.path.join(os.getcwd(), "output/02_img")
     out_select = os.path.join(os.getcwd(), "output/01_data/pids_urls_select.csv")
-    mly_api_key = "MLY|28359316630418089|d97008e9e9df81199d89f77536931500"
+    from openfacades.env import get_mly_api_key
+    mly_api_key = get_mly_api_key()
     os.makedirs(output_img_path, exist_ok=True)
     os.makedirs(os.path.join(output_img_path, "cache"), exist_ok=True)
 

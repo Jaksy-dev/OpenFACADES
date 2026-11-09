@@ -71,3 +71,48 @@ def filter_img_by_aov(aov_dir,
 
     return metadata_select
 
+
+
+def thin_by_distance(input_file, output_file, spacing_m=5.0):
+    """
+    Keep at most one panorama per `spacing_m` metres, preferring the best ones.
+
+    Images are ranked by Mapillary quality_score (higher first; missing/0 =
+    unscored, ranked last), then by captured_at (newer first). Walking that
+    ranking greedily, an image is kept only if no already-kept image lies
+    within `spacing_m`, so the kept set has a guaranteed minimum spacing and
+    each spot is represented by its best available image.
+    """
+    import math
+    from collections import defaultdict
+
+    df = pd.read_csv(input_file)
+    if spacing_m is None or spacing_m <= 0 or df.empty:
+        df.to_csv(output_file, index=False)
+        return output_file
+
+    pts = gpd.GeoSeries(gpd.points_from_xy(df["lng"], df["lat"]), crs="EPSG:4326")
+    pts = pts.to_crs(pts.estimate_utm_crs())
+    df["_x"], df["_y"] = pts.x.values, pts.y.values
+
+    quality = pd.to_numeric(df.get("quality_score"), errors="coerce")
+    df["_q"] = quality.where(quality > 0)  # 0 means "not scored"
+    df["_t"] = pd.to_numeric(df.get("captured_at"), errors="coerce")
+    ranked = df.sort_values(["_q", "_t"], ascending=[False, False], na_position="last")
+
+    grid = defaultdict(list)  # cell -> kept (x, y)
+    keep = []
+    r2 = spacing_m * spacing_m
+    for idx, x, y in zip(ranked.index, ranked["_x"], ranked["_y"]):
+        cx, cy = math.floor(x / spacing_m), math.floor(y / spacing_m)
+        if any((x - px) ** 2 + (y - py) ** 2 < r2
+               for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+               for px, py in grid[(cx + dx, cy + dy)]):
+            continue
+        grid[(cx, cy)].append((x, y))
+        keep.append(idx)
+
+    out = df.loc[sorted(keep)].drop(columns=["_x", "_y", "_q", "_t"])
+    out.to_csv(output_file, index=False)
+    print(f"Spatial thinning ({spacing_m:g} m): kept {len(out)} of {len(df)} panoramas")
+    return output_file

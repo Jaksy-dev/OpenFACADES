@@ -16,14 +16,16 @@ col_names = {
         }
 
 class BuildingDataDownloader:
-    def __init__(self, source="osm"):
+    def __init__(self, source="osm", osm_file=None):
         """
         Initialize the downloader with a data source.
         :param source: 'osm' for OpenStreetMap, 'overture' for Overture Maps.
+        :param osm_file: optional local .osm XML file read instead of querying Overpass.
         """
         if source not in ["osm", "overture"]:
             raise ValueError("Source must be either 'osm' or 'overture'.")
         self.source = source
+        self.osm_file = osm_file
 
     def _is_bbox(self, input_value):
         return (
@@ -64,7 +66,11 @@ class BuildingDataDownloader:
         tags = {"building": True}
         print("Retrieving data from OpenStreetMap...")
         
-        if int(ox.__version__.split(".")[0]) >= 2:
+        if self.osm_file:
+            from shapely.geometry import box
+            print(f"Reading local OSM file: {self.osm_file}")
+            gdf = ox.features_from_xml(self.osm_file, polygon=box(*bbox), tags=tags)
+        elif int(ox.__version__.split(".")[0]) >= 2:
             gdf = ox.features_from_bbox(tuple(bbox), tags)
         else:
             gdf = ox.features_from_bbox(bbox=(bbox[3], bbox[1], bbox[2], bbox[0]), tags=tags)
